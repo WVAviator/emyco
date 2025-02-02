@@ -10,23 +10,26 @@ mod timer;
 use std::time::{Duration, Instant};
 
 use cpu::CPU;
+use crossbeam::channel::Receiver;
 use memory::{MemoryBus, SharedMemoryController};
 use tauri::AppHandle;
+
+use crate::emulator::{Emulator, EmulatorCommand};
 
 pub struct Gameboy {
     memory: SharedMemoryController,
     cpu: CPU,
 }
 
-impl Gameboy {
-    pub fn new(rom: Vec<u8>, app_handle: AppHandle) -> Self {
+impl Emulator for Gameboy {
+    fn new(rom: Vec<u8>, app_handle: AppHandle) -> Self {
         let memory = MemoryBus::from_rom(rom, app_handle).unwrap();
         let cpu = CPU::new(memory.clone());
 
         Gameboy { memory, cpu }
     }
 
-    pub fn start(&mut self) -> Result<(), anyhow::Error> {
+    fn start(&mut self, receiver: Receiver<EmulatorCommand>) -> Result<(), anyhow::Error> {
         self.cpu.reboot();
 
         let cycle_time = Duration::from_secs_f32(
@@ -37,6 +40,12 @@ impl Gameboy {
         loop {
             while Instant::now() < next_cycle {}
 
+            match receiver.try_recv() {
+                Ok(EmulatorCommand::Start) => {}
+                Ok(EmulatorCommand::Stop) => break,
+                Err(_) => {}
+            };
+
             self.cpu.tick(GlobalConstants::CYCLE_RESOLUTION);
             self.memory
                 .write()
@@ -45,6 +54,8 @@ impl Gameboy {
 
             next_cycle += cycle_time;
         }
+
+        Ok(())
     }
 }
 
