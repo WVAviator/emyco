@@ -1,11 +1,12 @@
-import { createSignal } from 'solid-js';
 import { appDataDir, BaseDirectory, join } from '@tauri-apps/api/path';
 import { open } from '@tauri-apps/plugin-dialog';
 import { copyFile, mkdir } from '@tauri-apps/plugin-fs';
 
-const RomPicker = () => {
-  const [selectedDir, setSelectedDir] = createSignal<string | null>(null);
+interface RomPickerProps {
+  onRomAdded: () => void;
+}
 
+const RomPicker = ({ onRomAdded }: RomPickerProps) => {
   const pickFile = async () => {
     try {
       const filePath = await open({
@@ -31,7 +32,7 @@ const RomPicker = () => {
         toPathBaseDir: BaseDirectory.AppData,
       });
 
-      setSelectedDir(newDir);
+      onRomAdded();
     } catch (error) {
       console.error('Error selecting file:', error);
     }
@@ -39,8 +40,12 @@ const RomPicker = () => {
 
   return (
     <div>
-      <button onClick={pickFile}>Select a GameBoy ROM</button>
-      {selectedDir() && <p>ROM stored in: {selectedDir()}</p>}
+      <button
+        class="cursor-pointer bg-gray-200 rounded-md px-4 py-2"
+        onClick={pickFile}
+      >
+        Import ROM
+      </button>
     </div>
   );
 };

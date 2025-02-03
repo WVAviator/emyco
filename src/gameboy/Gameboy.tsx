@@ -1,12 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import GameboyCanvas from './GameboyCanvas';
-import { onMount } from 'solid-js';
 
 const Gameboy = () => {
-  onMount(() => {
-    console.log('Setting up Gameboy as current emulator.');
-    invoke('setup_gameboy');
-  });
   return (
     <section>
       <div class="flex gap-4 items-center justify-center w-full">

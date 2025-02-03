@@ -1,26 +1,24 @@
 import './index.css';
 import Gameboy from './gameboy/Gameboy';
 import { createSignal, Show } from 'solid-js';
-import RomPicker from './RomPicker';
+import RomList from './RomList';
+import { invoke } from '@tauri-apps/api/core';
 
 type EmulatorType = 'none' | 'gameboy';
 
 function App() {
   const [emulator, setEmulator] = createSignal<EmulatorType>('none');
 
+  const selectRom = (romName: string) => {
+    invoke('setup_gameboy', { name: romName });
+    setEmulator('gameboy');
+  }
+
   return (
     <main class="container">
-      <RomPicker />
       <Show when={emulator() === 'none'}>
         <div>
-          <button
-            class="py-2 px-4 rounded-sm bg-gray-100 cursor-pointer"
-            on:click={() => {
-              setEmulator('gameboy');
-            }}
-          >
-            Gameboy
-          </button>
+          <RomList onRomSelect={selectRom} />
         </div>
       </Show>
       <Show when={emulator() === 'gameboy'}>
