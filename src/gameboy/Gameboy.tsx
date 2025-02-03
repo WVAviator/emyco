@@ -28,7 +28,7 @@ const Gameboy = () => {
         </button>
       </div>
       <div class="w-full relative z-0">
-        <div class=" relative w-full">
+        <div class="relative w-full">
           <img
             class="absolute object-cover w-full scale-150 top-28 pointer-events-none"
             src="/gameboy.png"
