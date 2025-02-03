@@ -6,10 +6,7 @@ use cartridge::Cartridge;
 use log::{info, trace};
 use tauri::AppHandle;
 
-use std::{
-    rc::Rc,
-    sync::{Arc, RwLock},
-};
+use std::{rc::Rc, sync::RwLock};
 
 use super::{
     apu::APU, display::WebviewDisplay, joypad::Joypad, ppu::PPU, serial::Serial, timer::Timer,
@@ -18,17 +15,11 @@ use super::{
 
 const BOOT_ROM: &[u8; 256] = include_bytes!("./memory/dmg_boot.bin");
 
-pub type SharedMemoryController = Arc<RwLock<dyn MemoryController>>;
+pub type SharedMemoryController = Rc<RwLock<dyn MemoryController>>;
 
 pub trait MemoryController {
     fn read_byte(&self, address: u16) -> u8;
     fn write_byte(&mut self, address: u16, value: u8);
-
-    fn modify_byte(&mut self, address: u16, modify_fn: &dyn Fn(u8) -> u8) {
-        let byte = self.read_byte(address);
-        let byte = modify_fn(byte);
-        self.write_byte(address, byte);
-    }
 
     fn tick(&mut self, _cycles: u32) {}
     fn trigger_interrupt(&mut self, interrupt: Interrupt) {
@@ -74,7 +65,7 @@ pub struct MemoryBus {
     dma_state: DMAState,
     pending_cycles: i32,
     timer: Timer,
-    joypad: Joypad,
+    joypad: Rc<RwLock<Joypad>>,
     serial: Serial,
     apu: APU,
     ppu: PPU,
@@ -84,6 +75,7 @@ impl MemoryBus {
     pub fn from_rom(
         rom: Vec<u8>,
         app_handle: AppHandle,
+        joypad: Rc<RwLock<Joypad>>,
     ) -> Result<SharedMemoryController, anyhow::Error> {
         let cartridge = Cartridge::new(rom)?;
 
@@ -92,7 +84,6 @@ impl MemoryBus {
         let dma_state = DMAState::Inactive;
         let pending_cycles = 0;
         let timer = Timer::new();
-        let joypad = Joypad::new();
         let serial = Serial::new();
         let apu = APU::new();
         let display = WebviewDisplay::new(app_handle);
@@ -111,7 +102,7 @@ impl MemoryBus {
             ppu,
         };
 
-        Ok(Arc::new(RwLock::new(memory_bus)))
+        Ok(Rc::new(RwLock::new(memory_bus)))
     }
 
     fn raw_read(&self, address: u16) -> u8 {
@@ -124,7 +115,7 @@ impl MemoryBus {
             0xFF01..=0xFF02 => self.serial.read(address),
             0xFF04..=0xFF07 => self.timer.read(address),
             0xFF40..=0xFF4B => self.ppu.read(address),
-            0xFF00 => self.joypad.read(address),
+            0xFF00 => self.joypad.read().unwrap().read(address),
             0xFF10..=0xFF3F if GlobalConstants::AUDIO_ENABLED => self.apu.read(address),
             0xC000..=0xFFFF => self.internal_memory[(address - 0xC000) as usize],
         }
@@ -157,7 +148,7 @@ impl MemoryBus {
             0xFF04..=0xFF07 => self.timer.write(address, value),
             0xFE00..=0xFE9F => self.ppu.write(address, value),
             0xFF40..=0xFF4B => self.ppu.write(address, value),
-            0xFF00 => self.joypad.write(address, value),
+            0xFF00 => self.joypad.write().unwrap().write(address, value),
             0xC000..=0xFFFF => {
                 self.internal_memory[(address - 0xC000) as usize] = value;
             }
@@ -175,7 +166,7 @@ impl MemoryBus {
             interrupts |= interrupt;
         }
 
-        if let Some(interrupt) = self.joypad.retrieve_interrupts() {
+        if let Some(interrupt) = self.joypad.write().unwrap().retrieve_interrupts() {
             interrupts |= interrupt;
         }
 
@@ -199,7 +190,7 @@ impl MemoryController for MemoryBus {
         self.ppu.tick(cycles);
         self.timer.tick(cycles);
         self.serial.tick(cycles);
-        self.joypad.tick(cycles);
+        self.joypad.write().unwrap().tick(cycles);
         self.apu.tick(cycles);
 
         self.check_interrupts();
@@ -269,7 +260,7 @@ impl Default for TestMemoryBus {
 
 impl TestMemoryBus {
     pub fn new_shared() -> SharedMemoryController {
-        Arc::new(RwLock::new(TestMemoryBus::default()))
+        Rc::new(RwLock::new(TestMemoryBus::default()))
     }
 
     /// To be used for testing - loads the provided ROM directly into address 0x0100 for immediate
@@ -279,7 +270,7 @@ impl TestMemoryBus {
         let rom_size = rom_data.len().min(0x8000);
         memory.memory[0x0100..(rom_size + 0x0100)].copy_from_slice(&rom_data[..rom_size]);
 
-        Arc::new(RwLock::new(memory))
+        Rc::new(RwLock::new(memory))
     }
 
     pub fn load_rom(&mut self, rom_data: Vec<u8>) {

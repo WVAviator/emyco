@@ -7,10 +7,15 @@ mod ppu;
 mod serial;
 mod timer;
 
-use std::time::{Duration, Instant};
+use std::{
+    rc::Rc,
+    sync::RwLock,
+    time::{Duration, Instant},
+};
 
 use cpu::CPU;
 use crossbeam::channel::Receiver;
+use joypad::Joypad;
 use memory::{MemoryBus, SharedMemoryController};
 use tauri::AppHandle;
 
@@ -18,15 +23,25 @@ use crate::emulator::{Emulator, EmulatorCommand};
 
 pub struct Gameboy {
     memory: SharedMemoryController,
+    joypad: Rc<RwLock<Joypad>>,
     cpu: CPU,
+    clock: u32,
 }
 
 impl Emulator for Gameboy {
     fn new(rom: Vec<u8>, app_handle: AppHandle) -> Self {
-        let memory = MemoryBus::from_rom(rom, app_handle).unwrap();
+        let joypad = Rc::new(RwLock::new(Joypad::new()));
+
+        let memory = MemoryBus::from_rom(rom, app_handle, joypad.clone()).unwrap();
+
         let cpu = CPU::new(memory.clone());
 
-        Gameboy { memory, cpu }
+        Gameboy {
+            memory,
+            cpu,
+            joypad,
+            clock: 0,
+        }
     }
 
     fn start(&mut self, receiver: Receiver<EmulatorCommand>) -> Result<(), anyhow::Error> {
@@ -40,11 +55,23 @@ impl Emulator for Gameboy {
         loop {
             while Instant::now() < next_cycle {}
 
-            match receiver.try_recv() {
-                Ok(EmulatorCommand::Start) => {}
-                Ok(EmulatorCommand::Stop) => break,
-                Err(_) => {}
-            };
+            self.clock += GlobalConstants::CYCLE_RESOLUTION;
+
+            if self.clock >= GlobalConstants::INPUT_RESPONSIVENESS {
+                self.clock -= GlobalConstants::INPUT_RESPONSIVENESS;
+
+                match receiver.try_recv() {
+                    Ok(EmulatorCommand::Start) => {}
+                    Ok(EmulatorCommand::Stop) => break,
+                    Ok(EmulatorCommand::KeyDown(input)) => {
+                        self.joypad.write().unwrap().keydown(input);
+                    }
+                    Ok(EmulatorCommand::KeyUp(input)) => {
+                        self.joypad.write().unwrap().keyup(input);
+                    }
+                    Err(_) => {}
+                };
+            }
 
             self.cpu.tick(GlobalConstants::CYCLE_RESOLUTION);
             self.memory
@@ -75,7 +102,7 @@ impl GlobalConstants {
     /// registers will be ignored.
     pub const AUDIO_ENABLED: bool = true;
 
-    /// The number of t-cycles that pass before joypad events will be polled. Lower values means
+    /// The number of t-cycles that pass before events will be polled. Lower values means
     /// more responsive controls, sacrificing performance
-    pub const JOYPAD_INPUT_RESPONSIVENESS: u32 = 8192;
+    pub const INPUT_RESPONSIVENESS: u32 = 8192;
 }

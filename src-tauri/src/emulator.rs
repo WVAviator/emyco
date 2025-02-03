@@ -1,9 +1,8 @@
 use std::{fs, path::PathBuf, sync::Mutex};
 
-use anyhow::bail;
 use crossbeam::channel::{Receiver, Sender};
-use log::{error, info, warn};
-use tauri::{path::PathResolver, AppHandle, Manager, State};
+use log::{info, warn};
+use tauri::{AppHandle, Manager, State};
 
 use crate::gameboy::Gameboy;
 
@@ -58,9 +57,46 @@ pub fn stop_emulator(state: State<Mutex<AppState>>) {
     }
 }
 
+#[tauri::command]
+pub fn register_input(state: State<Mutex<AppState>>, key: String, down: bool) {
+    let input = match key.as_str() {
+        "start" => EmulatorInput::Start,
+        "select" => EmulatorInput::Select,
+        "a" => EmulatorInput::A,
+        "b" => EmulatorInput::B,
+        "up" => EmulatorInput::Up,
+        "down" => EmulatorInput::Down,
+        "left" => EmulatorInput::Left,
+        "right" => EmulatorInput::Right,
+        _ => panic!("Invalid input key string {}", key),
+    };
+
+    let state = state.lock().unwrap();
+    if let Some(ref emulator_handle) = state.emulator_handle {
+        emulator_handle.send_input(input, down);
+    } else {
+        warn!("No emulator loaded!")
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum EmulatorCommand {
     Start,
     Stop,
+    KeyDown(EmulatorInput),
+    KeyUp(EmulatorInput),
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum EmulatorInput {
+    Start,
+    Select,
+    A,
+    B,
+    Up,
+    Down,
+    Left,
+    Right,
 }
 
 pub struct EmulatorHandle {
@@ -77,9 +113,8 @@ impl EmulatorHandle {
             let mut emulator = E::new(rom, app_handle);
 
             if let Ok(command) = rx.recv() {
-                match command {
-                    EmulatorCommand::Start => emulator.start(rx).unwrap(),
-                    EmulatorCommand::Stop => {}
+                if command == EmulatorCommand::Start {
+                    emulator.start(rx).unwrap()
                 }
             }
         });
@@ -93,5 +128,14 @@ impl EmulatorHandle {
 
     pub fn stop(&self) {
         self.sender.send(EmulatorCommand::Stop).unwrap();
+    }
+
+    pub fn send_input(&self, input: EmulatorInput, down: bool) {
+        let command = match down {
+            true => EmulatorCommand::KeyDown(input),
+            false => EmulatorCommand::KeyUp(input),
+        };
+
+        self.sender.send(command).unwrap();
     }
 }
