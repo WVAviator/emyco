@@ -8,7 +8,7 @@ use crate::gameboy::Gameboy;
 
 pub trait Emulator {
     fn new(rom: Vec<u8>, app_handle: AppHandle) -> Self;
-    fn start(&mut self, receiver: Receiver<EmulatorCommand>) -> Result<(), anyhow::Error>;
+    fn start(&mut self, receiver: &Receiver<EmulatorCommand>) -> Result<(), anyhow::Error>;
 }
 
 pub struct AppState {
@@ -41,6 +41,17 @@ pub fn start_emulator(state: State<Mutex<AppState>>) {
     let state = state.lock().unwrap();
     if let Some(ref emulator_handle) = state.emulator_handle {
         emulator_handle.start();
+    } else {
+        warn!("No emulator loaded!")
+    }
+}
+
+#[tauri::command]
+pub fn pause_emulator(state: State<Mutex<AppState>>) {
+    info!("Stopping emulator");
+    let state = state.lock().unwrap();
+    if let Some(ref emulator_handle) = state.emulator_handle {
+        emulator_handle.pause();
     } else {
         warn!("No emulator loaded!")
     }
@@ -83,6 +94,7 @@ pub fn register_input(state: State<Mutex<AppState>>, key: String, down: bool) {
 pub enum EmulatorCommand {
     Start,
     Stop,
+    Pause,
     KeyDown(EmulatorInput),
     KeyUp(EmulatorInput),
 }
@@ -114,7 +126,7 @@ impl EmulatorHandle {
 
             if let Ok(command) = rx.recv() {
                 if command == EmulatorCommand::Start {
-                    emulator.start(rx).unwrap()
+                    emulator.start(&rx).unwrap()
                 }
             }
         });
@@ -124,6 +136,10 @@ impl EmulatorHandle {
 
     pub fn start(&self) {
         self.sender.send(EmulatorCommand::Start).unwrap();
+    }
+
+    pub fn pause(&self) {
+        self.sender.send(EmulatorCommand::Pause).unwrap();
     }
 
     pub fn stop(&self) {

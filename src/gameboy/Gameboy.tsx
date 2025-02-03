@@ -86,6 +86,14 @@ const Gameboy = () => {
         <button
           class="cursor-pointer p-4"
           on:click={() => {
+            invoke('pause_emulator');
+          }}
+        >
+          Pause
+        </button>
+        <button
+          class="cursor-pointer p-4"
+          on:click={() => {
             invoke('stop_emulator');
           }}
         >

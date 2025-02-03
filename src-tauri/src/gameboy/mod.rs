@@ -44,7 +44,7 @@ impl Emulator for Gameboy {
         }
     }
 
-    fn start(&mut self, receiver: Receiver<EmulatorCommand>) -> Result<(), anyhow::Error> {
+    fn start(&mut self, receiver: &Receiver<EmulatorCommand>) -> Result<(), anyhow::Error> {
         self.cpu.reboot();
 
         let cycle_time = Duration::from_secs_f32(
@@ -62,6 +62,13 @@ impl Emulator for Gameboy {
 
                 match receiver.try_recv() {
                     Ok(EmulatorCommand::Start) => {}
+                    Ok(EmulatorCommand::Pause) => {
+                        loop {
+                            if let Ok(EmulatorCommand::Start) = receiver.recv() {
+                                break;
+                            }
+                        }
+                    }
                     Ok(EmulatorCommand::Stop) => break,
                     Ok(EmulatorCommand::KeyDown(input)) => {
                         self.joypad.write().unwrap().keydown(input);
