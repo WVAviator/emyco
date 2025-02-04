@@ -24,20 +24,44 @@ impl AppState {
 }
 
 #[tauri::command]
+pub fn unload_emulator(state: State<Mutex<AppState>>) {
+    info!("Request to unload emulator received.");
+    let mut state = state.lock().unwrap();
+
+    if let Some(ref emulator_handle) = state.emulator_handle {
+        info!("Stopping...");
+        emulator_handle.stop();
+    } else {
+        warn!("No emulator loaded!")
+    }
+
+    info!("Unsetting emulator reference.");
+    state.emulator_handle = None;
+
+    info!("Emulator unloaded.");
+}
+
+#[tauri::command]
 pub fn setup_gameboy(state: State<Mutex<AppState>>, app_handle: AppHandle, name: String) {
+    info!("Request to load Gameboy emulator with ROM {} received.", name);
     if let Ok(app_dir) = app_handle.path().app_data_dir() {
         let rom_path = app_dir.join(format!("{}.gb", name));
 
         if rom_path.exists() {
+            info!("Identified ROM file at {:?}", rom_path);
+
             let mut state = state.lock().unwrap();
             state.emulator_handle = Some(EmulatorHandle::new::<Gameboy>(app_handle, rom_path));
+            info!("Initialized emulator with ROM {}", name);
+        } else {
+            warn!("No ROM file found at expected location {:?}", rom_path);
         }
     }
 }
 
 #[tauri::command]
 pub fn start_emulator(state: State<Mutex<AppState>>) {
-    info!("Starting emulator");
+    info!("Starting emulator...");
     let state = state.lock().unwrap();
     if let Some(ref emulator_handle) = state.emulator_handle {
         emulator_handle.start();

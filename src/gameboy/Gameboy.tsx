@@ -1,104 +1,36 @@
 import { invoke } from '@tauri-apps/api/core';
 import GameboyCanvas from './GameboyCanvas';
-import { useKeyPress } from '../hooks/useKeyPress';
+import useDefaultKeymap from '../hooks/useDefaultKeymap';
+import { createSignal } from 'solid-js';
+import ToggleSwitch from '../components/ToggleSwitch';
 
-const Gameboy = () => {
-  useKeyPress({
-    Escape: {
-      keydown: () => {
-        console.log('Sending start key down.');
-        invoke('register_input', { key: 'start', down: true });
-      },
-      keyup: () => {
-        console.log('Sending start key up.');
-        invoke('register_input', { key: 'start', down: false });
-      },
-    },
-    Tab: {
-      keydown: () => {
-        invoke('register_input', { key: 'select', down: true });
-      },
-      keyup: () => {
-        invoke('register_input', { key: 'select', down: false });
-      },
-    },
-    Enter: {
-      keydown: () => {
-        invoke('register_input', { key: 'a', down: true });
-      },
-      keyup: () => {
-        invoke('register_input', { key: 'a', down: false });
-      },
-    },
-    Backspace: {
-      keydown: () => {
-        invoke('register_input', { key: 'b', down: true });
-      },
-      keyup: () => {
-        invoke('register_input', { key: 'b', down: false });
-      },
-    },
-    w: {
-      keydown: () => {
-        invoke('register_input', { key: 'up', down: true });
-      },
-      keyup: () => {
-        invoke('register_input', { key: 'up', down: false });
-      },
-    },
-    s: {
-      keydown: () => {
-        invoke('register_input', { key: 'down', down: true });
-      },
-      keyup: () => {
-        invoke('register_input', { key: 'down', down: false });
-      },
-    },
-    a: {
-      keydown: () => {
-        invoke('register_input', { key: 'left', down: true });
-      },
-      keyup: () => {
-        invoke('register_input', { key: 'left', down: false });
-      },
-    },
-    d: {
-      keydown: () => {
-        invoke('register_input', { key: 'right', down: true });
-      },
-      keyup: () => {
-        invoke('register_input', { key: 'right', down: false });
-      },
-    },
-  });
+interface GameboyProps {
+  rom: string;
+}
+
+const Gameboy = (props: GameboyProps) => {
+
+  const [enabled, setEnabled] = createSignal(false);
+
+  const onToggle = async (checked: boolean) => {
+    setEnabled(checked);
+
+    if (checked) {
+        console.log("Setting up emulator with ROM {}", props.rom);
+        await invoke('setup_gameboy', { name: props.rom });
+        await invoke('start_emulator');
+    } else {
+        console.log("Unloading emulator.");
+        await invoke('unload_emulator');
+    }
+  } 
+
+  useDefaultKeymap()
 
   return (
     <section>
-      <div class="flex gap-4 items-center justify-center w-full">
-        <button
-          class="cursor-pointer p-4"
-          on:click={() => {
-            invoke('start_emulator');
-          }}
-        >
-          Start
-        </button>
-        <button
-          class="cursor-pointer p-4"
-          on:click={() => {
-            invoke('pause_emulator');
-          }}
-        >
-          Pause
-        </button>
-        <button
-          class="cursor-pointer p-4"
-          on:click={() => {
-            invoke('stop_emulator');
-          }}
-        >
-          Stop
-        </button>
+      <div class="flex h-16 gap-4 items-center justify-center w-full">
+        <ToggleSwitch checked={enabled} setChecked={onToggle}>Power</ToggleSwitch>
       </div>
       <div class="w-full relative z-0">
         <div class="relative w-full">
@@ -108,7 +40,7 @@ const Gameboy = () => {
           />
         </div>
         <div class="absolute left-[218px] top-[122px] shadow-inner z-10 w-[327px] aspect-[1.08]">
-          <GameboyCanvas />
+          <GameboyCanvas enabled={enabled} />
         </div>
       </div>
     </section>

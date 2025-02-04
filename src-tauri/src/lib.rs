@@ -4,7 +4,7 @@ mod gameboy;
 use std::sync::Mutex;
 
 use emulator::{
-    pause_emulator, register_input, setup_gameboy, start_emulator, stop_emulator, AppState,
+    pause_emulator, register_input, unload_emulator, setup_gameboy, start_emulator, stop_emulator, AppState,
 };
 use tauri::Manager;
 
@@ -16,6 +16,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             setup_gameboy,
+            unload_emulator,
             start_emulator,
             pause_emulator,
             stop_emulator,

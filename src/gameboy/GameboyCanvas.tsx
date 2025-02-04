@@ -1,4 +1,4 @@
-import { onCleanup, onMount } from 'solid-js';
+import { Accessor, onCleanup, onMount } from 'solid-js';
 import { listen } from '@tauri-apps/api/event';
 
 const WIDTH = 160;
@@ -11,7 +11,11 @@ const PALETTE = [
   [15, 56, 15, 255],
 ];
 
-const GameboyCanvas = () => {
+interface GameboyCanvasProps {
+  enabled: Accessor<boolean>;
+}
+
+const GameboyCanvas = (props: GameboyCanvasProps) => {
   let canvas: HTMLCanvasElement | undefined;
   let ctx: CanvasRenderingContext2D | null = null;
   let imageData: ImageData;
@@ -40,15 +44,20 @@ const GameboyCanvas = () => {
   });
 
   return (
-    <canvas
-      ref={canvas}
-      width={WIDTH}
-      height={HEIGHT}
-      class="w-full h-full"
-      style={{
-        'image-rendering': 'pixelated',
-      }}
-    />
+    <div class="relative w-full h-full">
+      <canvas
+        ref={canvas}
+        width={WIDTH}
+        height={HEIGHT}
+        class="w-full h-full"
+        style={{
+          'image-rendering': 'pixelated',
+        }}
+      />
+      <div class="absolute inset-0 z-10 transition-opacity border border-red-500 duration-1000 ease-in-out bg-[#9BBC0F]" style={{
+        opacity: props.enabled() ? 0 : 1,
+      }}></div>
+    </div>
   );
 };
 
