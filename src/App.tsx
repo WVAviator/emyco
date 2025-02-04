@@ -12,7 +12,7 @@ function App() {
   const selectRom = (romName: string) => {
     setEmulator('gameboy');
     setRom(romName);
-  }
+  };
 
   return (
     <main class="container">
@@ -22,7 +22,13 @@ function App() {
         </div>
       </Show>
       <Show when={emulator() === 'gameboy' && rom != null}>
-        <Gameboy rom={rom()!} />
+        <Gameboy
+          rom={rom()!}
+          onGoBack={() => {
+            setRom(null);
+            setEmulator('none');
+          }}
+        />
       </Show>
     </main>
   );

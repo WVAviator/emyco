@@ -1,6 +1,7 @@
 import { appDataDir, BaseDirectory, join } from '@tauri-apps/api/path';
 import { open } from '@tauri-apps/plugin-dialog';
-import { copyFile, mkdir, readFile } from '@tauri-apps/plugin-fs';
+import { copyFile, readFile } from '@tauri-apps/plugin-fs';
+import { FiUpload } from 'solid-icons/fi';
 
 interface RomPickerProps {
   onRomAdded: () => void;
@@ -47,10 +48,8 @@ const RomPicker = ({ onRomAdded }: RomPickerProps) => {
 
   return (
     <div>
-      <button
-        class="cursor-pointer bg-gray-200 rounded-md px-4 py-2"
-        onClick={pickFile}
-      >
+      <button class="btn" onClick={pickFile}>
+        <FiUpload />
         Import ROM
       </button>
     </div>

@@ -1,28 +1,35 @@
-import { createSignal, createEffect } from 'solid-js';
-import { appDataDir, BaseDirectory } from '@tauri-apps/api/path';
-import { readDir } from '@tauri-apps/plugin-fs';
+import { createSignal, createEffect, For } from 'solid-js';
+import { appDataDir, BaseDirectory, join } from '@tauri-apps/api/path';
+import { readDir, readFile } from '@tauri-apps/plugin-fs';
 import RomPicker from './RomPicker';
+import { extractRomMetadata, GameboyRomMetadata } from './utilities/metadata';
 
 interface RomListProps {
   onRomSelect: (romName: string) => void;
 }
 
 const RomList = ({ onRomSelect }: RomListProps) => {
-  const [romFiles, setRomFiles] = createSignal<string[]>([]);
+  const [roms, setRoms] = createSignal<GameboyRomMetadata[]>([]);
 
   const fetchRoms = async () => {
     try {
       const appDir = await appDataDir();
       const entries = await readDir(appDir, { baseDir: BaseDirectory.AppData });
 
-      const gbFiles: string[] = entries
-        .filter(
-          (entry) =>
-            !entry.isDirectory && entry.name?.toLowerCase().endsWith('.gb')
-        )
-        .map((entry) => entry.name.split('.')[0]);
+      const romData: GameboyRomMetadata[] = await Promise.all(
+        entries
+          .filter(
+            (entry) =>
+              !entry.isDirectory && entry.name?.toLowerCase().endsWith('.gb')
+          )
+          .map(async (entry) => {
+            const filePath = await join(appDir, entry.name);
+            const romData = await readFile(filePath);
+            return extractRomMetadata(romData);
+          })
+      );
 
-      setRomFiles(gbFiles);
+      setRoms(romData);
     } catch (error) {
       console.error('Error reading ROM directories:', error);
     }
@@ -30,30 +37,47 @@ const RomList = ({ onRomSelect }: RomListProps) => {
 
   createEffect(() => fetchRoms());
 
-  const handleRomClick = (romName: string) => {
-    console.log(`Clicked ROM: ${romName}`);
-    onRomSelect(romName);
+  const handleRomClick = (rom: GameboyRomMetadata) => {
+    console.log(`Clicked ROM: ${rom.title}`);
+    onRomSelect(rom.title);
   };
 
   return (
     <div class="flex flex-col items-center w-full gap-4">
       <h2>Available ROMs</h2>
-      <div class="min-h-32 min-w-48 border-2 rounded-md flex flex-col items-center p-2">
-        {romFiles().length > 0 ? (
-          <ul class="flex flex-col items-center gap-2 p-2">
-            {romFiles().map((rom) => (
-              <li
-                onClick={() => handleRomClick(rom)}
-                class="cursor-pointer px-4 py-2"
-                style={{ cursor: 'pointer', margin: '5px 0' }}
-              >
-                {rom}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p>No ROMs found.</p>
-        )}
+      <div class="overflow-x-auto">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Game Title</th>
+              <th>Publisher</th>
+              <th>ROM Size</th>
+              <th>RAM Size</th>
+            </tr>
+          </thead>
+          <tbody>
+            <For
+              each={roms()}
+              fallback={
+                <tr>
+                  <td>No ROMs Available</td>
+                </tr>
+              }
+            >
+              {(rom: GameboyRomMetadata) => (
+                <tr
+                  class="hover:bg-base-200 cursor-pointer"
+                  on:click={() => handleRomClick(rom)}
+                >
+                  <td class="whitespace-nowrap">{rom.formattedTitle}</td>
+                  <td>{rom.licensee}</td>
+                  <td>{rom.romSize}</td>
+                  <td>{rom.ramSize}</td>
+                </tr>
+              )}
+            </For>
+          </tbody>
+        </table>
       </div>
       <RomPicker onRomAdded={fetchRoms} />
     </div>
