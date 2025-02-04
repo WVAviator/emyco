@@ -5,6 +5,7 @@ use std::collections::VecDeque;
 use crate::gameboy::display::Color;
 
 use super::{
+    cpu::OperationQueue,
     display::Display,
     memory::{Interrupt, Register},
 };
@@ -23,6 +24,9 @@ const OBP1_ADDRESS: u16 = 0xFF49;
 const WY_ADDRESS: u16 = 0xFF4A;
 const WX_ADDRESS: u16 = 0xFF4B;
 
+const OPERATION_QUEUE_CAPACITY: usize = 64;
+
+#[allow(clippy::upper_case_acronyms)]
 pub struct PPU {
     lcd_state: LcdState,
     pending_interrupts: Option<Interrupt>,
@@ -31,7 +35,7 @@ pub struct PPU {
     clock: u32,
     scanline_clock: u32,
     display: Box<dyn Display>,
-    operation_queue: VecDeque<Operation>,
+    operation_queue: OperationQueue<Operation, OPERATION_QUEUE_CAPACITY>,
     mode: Mode,
     sprite_buffer: Vec<Sprite>,
     bg_fifo: VecDeque<Pixel>,
@@ -45,7 +49,7 @@ pub struct PPU {
 
 impl PPU {
     pub fn new(display: Box<dyn Display>) -> Self {
-        let mut operation_queue = VecDeque::new();
+        let mut operation_queue = OperationQueue::new();
         operation_queue.push_back(Operation::NewFrame);
 
         PPU {
@@ -69,6 +73,7 @@ impl PPU {
         }
     }
 
+    #[inline]
     fn fetch_sprite(&self, address: u16) -> Sprite {
         debug_assert!(
             address >= 0xFE00 && address + 3 <= 0xFE9F,
@@ -94,10 +99,12 @@ impl PPU {
         }
     }
 
+    #[inline]
     fn enabled(&self) -> bool {
         self.registers.lcdc.contains(LCDC::LCD_DISPLAY_ENABLE)
     }
 
+    #[inline]
     fn sprite_height(&self) -> u8 {
         match self.registers.lcdc {
             lcdc if lcdc.contains(LCDC::SPRITE_DOUBLE_SIZE) => 16,
@@ -105,6 +112,7 @@ impl PPU {
         }
     }
 
+    #[inline]
     fn get_bg_tile_number(&self) -> u8 {
         let tilemap_base_address: u16 = match self.registers.lcdc.contains(LCDC::BG_TILEMAP_SELECT)
         {
@@ -122,6 +130,7 @@ impl PPU {
         self.read(tilemap_address)
     }
 
+    #[inline]
     fn fetch_bg_tile(&self, tile_number: u8) -> (u8, u8) {
         let mut base_address = 0x8000;
 
@@ -150,6 +159,7 @@ impl PPU {
         (low, high)
     }
 
+    #[inline]
     fn get_window_tile_number(&self) -> u8 {
         let tilemap_base_address: u16 =
             match self.registers.lcdc.contains(LCDC::WINDOW_TILEMAP_SELECT) {
@@ -167,6 +177,7 @@ impl PPU {
         self.read(tilemap_address)
     }
 
+    #[inline]
     fn fetch_window_tile(&self, tile_number: u8) -> (u8, u8) {
         let mut base_address = 0x8000;
 
@@ -194,6 +205,7 @@ impl PPU {
         (low, high)
     }
 
+    #[inline]
     fn fetch_sprite_tile(&self, sprite: Sprite) -> (u8, u8) {
         let flipped = sprite.attributes.contains(SpriteAttributes::Y_FLIP);
         let height = self.sprite_height() as u16;
@@ -231,6 +243,7 @@ impl PPU {
         (low, high)
     }
 
+    #[inline]
     fn generate_bg_pixels(&self, low: u8, high: u8) -> [Pixel; 8] {
         let mut pixels = [Pixel::default(); 8];
         for (i, pixel) in pixels.iter_mut().enumerate() {
@@ -246,6 +259,7 @@ impl PPU {
         pixels
     }
 
+    #[inline]
     fn generate_obj_pixels(&self, low: u8, high: u8, sprite: Sprite) -> [Pixel; 8] {
         let mut pixels = [Pixel::default(); 8];
         for (i, pixel) in pixels.iter_mut().enumerate() {
@@ -265,6 +279,7 @@ impl PPU {
         pixels
     }
 
+    #[inline]
     fn enable_stat_interrupt(&mut self, interrupt: STAT) {
         // The stat line is the logical OR between all enabled stat sources and respective states
         let current_stat_line = !(self.active_interrupts & self.registers.stat).is_empty();
@@ -281,10 +296,12 @@ impl PPU {
         }
     }
 
+    #[inline]
     fn disable_stat_interrupt(&mut self, interrupt: STAT) {
         self.active_interrupts.remove(interrupt);
     }
 
+    #[inline]
     fn check_lyc(&mut self) {
         if self.registers.ly == self.registers.lyc {
             self.registers.stat.insert(STAT::COINCIDENCE_FLAG);
@@ -295,6 +312,7 @@ impl PPU {
         }
     }
 
+    #[inline]
     fn reset_scanline(&mut self, scanline: u8) {
         // Update LY and reset LX
         self.registers.ly = scanline;
@@ -304,7 +322,7 @@ impl PPU {
 
         // Increment the window line counter if we rendered any window pixels in the last scanline
         if self.window_mode {
-            self.wlc += 1;
+            self.wlc = self.wlc.wrapping_add(1);
         }
         self.window_mode = false;
 
@@ -545,14 +563,16 @@ impl Register for PPU {
                     let (tile_low, tile_high) = self.fetch_bg_tile(tile_number);
                     let pixels = self.generate_bg_pixels(tile_low, tile_high);
 
-                    self.operation_queue.push_back(PushBackgroundPixels(pixels));
+                    self.bg_fifo.extend(pixels);
+                    self.operation_queue.push_back(PopPixels);
                 }
                 FetchWindowPixels => {
                     let tile_number = self.get_window_tile_number();
                     let (tile_low, tile_high) = self.fetch_window_tile(tile_number);
                     let pixels = self.generate_bg_pixels(tile_low, tile_high);
 
-                    self.operation_queue.push_back(PushBackgroundPixels(pixels));
+                    self.bg_fifo.extend(pixels);
+                    self.operation_queue.push_back(PopPixels);
                 }
                 FetchSpritePixels(sprite) => {
                     let (tile_low, tile_high) = self.fetch_sprite_tile(sprite);
@@ -594,20 +614,6 @@ impl Register for PPU {
                         self.operation_queue
                             .push_back(Sleep(6 - self.bg_fifo.len() as u32));
                     }
-                }
-                PushBackgroundPixels(pixels) => {
-                    if !self.bg_fifo.is_empty() {
-                        debug_assert!(
-                            !self.operation_queue.is_empty(),
-                            "Invalid state: BG Fifo has pixels left to process but there are no more operations on the queue."
-                        );
-                        // Cannot push pixels to fifo unless it is empty, try again after a few
-                        // more operations
-                        self.operation_queue.push_back(PushBackgroundPixels(pixels));
-                    }
-
-                    self.bg_fifo.extend(pixels);
-                    self.operation_queue.push_back(PopPixels);
                 }
                 PopPixels => {
                     if self.bg_fifo.is_empty() {
@@ -746,7 +752,6 @@ enum Operation {
     FetchBackgroundPixels,
     FetchWindowPixels,
     FetchSpritePixels(Sprite),
-    PushBackgroundPixels([Pixel; 8]),
     PopPixels,
     CheckPixel,
     Sleep(u32),
@@ -762,7 +767,6 @@ impl Operation {
             Operation::FetchBackgroundPixels => 8,
             Operation::FetchWindowPixels => 8,
             Operation::FetchSpritePixels(_) => 6,
-            Operation::PushBackgroundPixels(_) => 0,
             Operation::PopPixels => 0,
             Operation::CheckPixel => 0,
             Operation::Sleep(cycles) => *cycles,
@@ -795,7 +799,6 @@ impl Default for Pixel {
     }
 }
 
-/// Represents the different types of palettes a pixel can have
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum Palette {
     Bgp,
@@ -884,17 +887,17 @@ bitflags! {
 }
 
 pub struct InternalRegisters {
-    pub ly: u8,
-    pub lyc: u8,
-    pub wx: u8,
-    pub wy: u8,
-    pub scx: u8,
-    pub scy: u8,
-    pub stat: STAT,
-    pub lcdc: LCDC,
-    pub obp0: u8,
-    pub obp1: u8,
-    pub bgp: u8,
+    ly: u8,
+    lyc: u8,
+    wx: u8,
+    wy: u8,
+    scx: u8,
+    scy: u8,
+    stat: STAT,
+    lcdc: LCDC,
+    obp0: u8,
+    obp1: u8,
+    bgp: u8,
 }
 
 impl InternalRegisters {

@@ -5,9 +5,6 @@ pub trait AudioChannel: Register {
     fn get_samples(&mut self) -> [i16; SAMPLE_BUFFER_SIZE];
 }
 
-#[repr(transparent)]
-pub struct AmplitudeChange(pub i16);
-
 pub struct PulseChannel {
     enabled: bool,
     sweep: Sweep,

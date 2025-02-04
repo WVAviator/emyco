@@ -3,7 +3,9 @@ mod gameboy;
 
 use std::sync::Mutex;
 
-use emulator::{pause_emulator, register_input, setup_gameboy, start_emulator, stop_emulator, AppState};
+use emulator::{
+    pause_emulator, register_input, setup_gameboy, start_emulator, stop_emulator, AppState,
+};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -21,7 +23,6 @@ pub fn run() {
         ])
         .setup(|app| {
             let app_state = Mutex::new(AppState::new());
-
             app.manage(app_state);
 
             Ok(())

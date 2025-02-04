@@ -1,10 +1,12 @@
 use std::fmt::Debug;
 
+#[allow(clippy::upper_case_acronyms)]
 pub trait MBC: Debug + Send + Sync {
     fn translate_address(&self, address: u16) -> Option<(u32, BankType)>;
     fn handle_control_write(&mut self, address: u16, value: u8);
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, PartialEq, Clone)]
 pub enum BankType {
     RAM,
@@ -294,6 +296,7 @@ impl MBC for NoMBC {
 
 use chrono::{Days, Duration, NaiveDateTime, Timelike, Utc};
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, PartialEq, Clone)]
 pub struct RTC {
     real_time_offset_secs: i64,

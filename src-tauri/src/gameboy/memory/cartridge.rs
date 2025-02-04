@@ -1,5 +1,6 @@
 use std::{
     fmt::Debug,
+    path::PathBuf,
     sync::{Arc, RwLock},
 };
 
@@ -29,14 +30,16 @@ pub struct Cartridge {
 }
 
 impl Cartridge {
-    pub fn new(rom: Vec<u8>) -> Result<Self, anyhow::Error> {
+    pub fn new(rom: Vec<u8>, mut save_data_path: PathBuf) -> Result<Self, anyhow::Error> {
         let mbc_type = rom[0x147];
         let title: String = rom[0x0134..=0x0143]
             .iter()
             .take_while(|byte| **byte != 0x00)
             .map(|byte| *byte as char)
             .collect();
-        let path = format!("./{}.sav", title);
+
+        save_data_path.push(format!("{}.sav", &title));
+        info!("Preparing save data at location {:?}", save_data_path);
 
         let mbc: Box<dyn MBC> = match mbc_type {
             0x00 => Box::new(NoMBC::new()),
@@ -69,7 +72,7 @@ impl Cartridge {
         let ram = Arc::new(RwLock::new(ram));
 
         let persister = match mbc_type {
-            0x03 | 0x06 | 0x0F | 0x10 | 0x13 => Some(Persister::new(path, ram.clone())),
+            0x03 | 0x06 | 0x0F | 0x10 | 0x13 => Some(Persister::new(save_data_path, ram.clone())),
             _ => None,
         };
 
@@ -144,7 +147,7 @@ pub struct Persister {
 struct PersistRequest;
 
 impl Persister {
-    pub fn new(path: String, ram: Arc<RwLock<Vec<u8>>>) -> Self {
+    pub fn new(path: PathBuf, ram: Arc<RwLock<Vec<u8>>>) -> Self {
         let (tx, rx) = crossbeam::channel::bounded(16);
 
         let existing_save_data = fs::read(&path).unwrap_or_default();
@@ -155,7 +158,7 @@ impl Persister {
             ram.resize(existing_save_data.len(), 0);
             ram.copy_from_slice(&existing_save_data);
 
-            info!("Loaded existing game save from {}", &path);
+            info!("Loaded existing game save from {:?}", &path);
         }
 
         std::thread::spawn(move || {
@@ -174,7 +177,10 @@ impl Persister {
                 {
                     let ram = ram.read().unwrap().clone();
 
-                    info!("Saving game data following cartridge RAM write.");
+                    info!(
+                        "Saving game data to {:?} following cartridge RAM write.",
+                        &path
+                    );
                     fs::write(&path, ram).expect("Unable to write to file.");
                 }
             }

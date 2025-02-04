@@ -4,9 +4,9 @@ mod mbc;
 use bitflags::bitflags;
 use cartridge::Cartridge;
 use log::{info, trace};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
-use std::{rc::Rc, sync::RwLock};
+use std::{path::PathBuf, rc::Rc, sync::RwLock};
 
 use super::{
     apu::APU, display::WebviewDisplay, joypad::Joypad, ppu::PPU, serial::Serial, timer::Timer,
@@ -77,7 +77,8 @@ impl MemoryBus {
         app_handle: AppHandle,
         joypad: Rc<RwLock<Joypad>>,
     ) -> Result<SharedMemoryController, anyhow::Error> {
-        let cartridge = Cartridge::new(rom)?;
+        let save_data_path = app_handle.path().local_data_dir().unwrap();
+        let cartridge = Cartridge::new(rom, save_data_path)?;
 
         let internal_memory = [0; 16384];
         let boot_mode = true;
@@ -259,22 +260,19 @@ impl Default for TestMemoryBus {
 }
 
 impl TestMemoryBus {
+    #[allow(dead_code)]
     pub fn new_shared() -> SharedMemoryController {
         Rc::new(RwLock::new(TestMemoryBus::default()))
     }
 
     /// To be used for testing - loads the provided ROM directly into address 0x0100 for immediate
     /// program counter execution.
+    #[allow(dead_code)]
     pub fn with_test_rom(rom_data: Vec<u8>) -> SharedMemoryController {
         let mut memory = TestMemoryBus::default();
         let rom_size = rom_data.len().min(0x8000);
         memory.memory[0x0100..(rom_size + 0x0100)].copy_from_slice(&rom_data[..rom_size]);
 
         Rc::new(RwLock::new(memory))
-    }
-
-    pub fn load_rom(&mut self, rom_data: Vec<u8>) {
-        let rom_size = rom_data.len().min(0x8000);
-        self.memory[0x0000..rom_size].copy_from_slice(&rom_data[..rom_size]);
     }
 }

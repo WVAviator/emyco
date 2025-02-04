@@ -27,6 +27,7 @@ const fn ceil_f32(n: f32) -> f32 {
     }
 }
 
+#[allow(clippy::upper_case_acronyms)]
 pub struct APU {
     enabled: bool,
     channel1: PulseChannel,
@@ -153,9 +154,7 @@ impl Register for APU {
         self.apu_clock += cycles;
         if self.apu_clock >= AUDIO_FRAME_LENGTH {
             let buffer = self.mix_channels();
-            // if self.channel_tx.try_send(SampleBuffer(buffer)).is_err() {
-            //     warn!("Audio sample block dropped due to full message queue.")
-            // }
+
             self.channel_tx.send(SampleBuffer(buffer)).unwrap();
 
             self.apu_clock -= AUDIO_FRAME_LENGTH;
@@ -174,7 +173,6 @@ pub struct OutputChannel {
     sample_rate: u32,
     channel_rx: Receiver<SampleBuffer>,
     sample_buffer: ArrayDeque<i16, CAPACITY, Saturating>,
-    samples_dropped: bool,
 }
 
 impl OutputChannel {
@@ -183,12 +181,9 @@ impl OutputChannel {
             sample_rate,
             channel_rx,
             sample_buffer: ArrayDeque::new(),
-            samples_dropped: false,
         }
     }
 }
-
-const CROSSFADE_LENGTH: usize = 64;
 
 impl Iterator for OutputChannel {
     type Item = i16;

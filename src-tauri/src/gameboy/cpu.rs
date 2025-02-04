@@ -9,6 +9,7 @@ use super::memory::SharedMemoryController;
 
 const OP_QUEUE_SIZE: usize = 16;
 
+#[allow(clippy::upper_case_acronyms)]
 pub struct CPU {
     register_a: u8,
     register_b: u8,
@@ -30,6 +31,7 @@ pub struct CPU {
 }
 
 impl CPU {
+    #[allow(dead_code)]
     pub fn new_test(memory: SharedMemoryController) -> Self {
         CPU::new(memory)
     }
@@ -56,6 +58,7 @@ impl CPU {
         }
     }
 
+    #[inline]
     fn read_target(&mut self, target: &OpTarget) -> u8 {
         match target {
             OpTarget::RegisterA => self.register_a,
@@ -80,6 +83,7 @@ impl CPU {
         }
     }
 
+    #[inline]
     fn write_target(&mut self, target: OpTarget, value: u8) {
         match target {
             OpTarget::RegisterA => self.register_a = value,
@@ -111,6 +115,7 @@ impl CPU {
         }
     }
 
+    #[inline]
     fn perform_arithmetic(&mut self, operation: ArithmeticOperation, lhs: OpTarget, rhs: OpTarget) {
         let lhs_value = self.read_target(&lhs);
         let rhs_value = self.read_target(&rhs);
@@ -450,6 +455,7 @@ impl CPU {
         }
     }
 
+    #[inline]
     fn handle_interrupts(&mut self) {
         match self.interrupt_dispatch {
             InterruptDispatchState::Waiting => {
@@ -534,26 +540,6 @@ impl CPU {
 
     pub fn reboot(&mut self) {
         self.program_counter = 0;
-    }
-
-    pub fn execute(&mut self) {
-        self.stack_pointer = 0xFFFE;
-        self.program_counter = 0x0100;
-        self.state = CPUState::Ready;
-
-        let mut timeout = 10000;
-
-        loop {
-            timeout -= 1;
-            if timeout == 0 {
-                panic!("Timed out.");
-            }
-            if self.state == CPUState::Stopped {
-                break;
-            }
-
-            self.tick(4);
-        }
     }
 
     fn load_operation(&mut self) {
@@ -2909,7 +2895,6 @@ enum CPUState {
     Ready,
     HaltBug,
     Halted,
-    Stopped,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -2937,7 +2922,7 @@ bitflags! {
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
-pub enum Operation {
+enum Operation {
     ReadWriteWithFlags {
         read_from: OpTarget,
         write_to: OpTarget,

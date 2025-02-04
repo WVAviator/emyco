@@ -1,4 +1,4 @@
-use tauri::{App, AppHandle, Emitter};
+use tauri::{AppHandle, Emitter};
 
 /// A Display provides functions to render scanlines and present frames.
 pub trait Display {

@@ -7,11 +7,7 @@ mod ppu;
 mod serial;
 mod timer;
 
-use std::{
-    rc::Rc,
-    sync::RwLock,
-    time::{Duration, Instant},
-};
+use std::{path::PathBuf, rc::Rc, sync::RwLock};
 
 use cpu::CPU;
 use crossbeam::channel::Receiver;
@@ -47,14 +43,7 @@ impl Emulator for Gameboy {
     fn start(&mut self, receiver: &Receiver<EmulatorCommand>) -> Result<(), anyhow::Error> {
         self.cpu.reboot();
 
-        let cycle_time = Duration::from_secs_f32(
-            GlobalConstants::CYCLE_RESOLUTION as f32 / GlobalConstants::SYSTEM_CLOCK_RATE as f32,
-        );
-        let mut next_cycle = Instant::now();
-
         loop {
-            while Instant::now() < next_cycle {}
-
             self.clock += GlobalConstants::CYCLE_RESOLUTION;
 
             if self.clock >= GlobalConstants::INPUT_RESPONSIVENESS {
@@ -62,13 +51,11 @@ impl Emulator for Gameboy {
 
                 match receiver.try_recv() {
                     Ok(EmulatorCommand::Start) => {}
-                    Ok(EmulatorCommand::Pause) => {
-                        loop {
-                            if let Ok(EmulatorCommand::Start) = receiver.recv() {
-                                break;
-                            }
+                    Ok(EmulatorCommand::Pause) => loop {
+                        if let Ok(EmulatorCommand::Start) = receiver.recv() {
+                            break;
                         }
-                    }
+                    },
                     Ok(EmulatorCommand::Stop) => break,
                     Ok(EmulatorCommand::KeyDown(input)) => {
                         self.joypad.write().unwrap().keydown(input);
@@ -85,8 +72,6 @@ impl Emulator for Gameboy {
                 .write()
                 .unwrap()
                 .tick(GlobalConstants::CYCLE_RESOLUTION);
-
-            next_cycle += cycle_time;
         }
 
         Ok(())

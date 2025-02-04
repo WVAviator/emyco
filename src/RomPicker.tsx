@@ -1,6 +1,6 @@
 import { appDataDir, BaseDirectory, join } from '@tauri-apps/api/path';
 import { open } from '@tauri-apps/plugin-dialog';
-import { copyFile, mkdir } from '@tauri-apps/plugin-fs';
+import { copyFile, mkdir, readFile } from '@tauri-apps/plugin-fs';
 
 interface RomPickerProps {
   onRomAdded: () => void;
@@ -16,17 +16,24 @@ const RomPicker = ({ onRomAdded }: RomPickerProps) => {
 
       if (!filePath) return;
 
-      const fileNameWithExt = filePath.split('/').pop();
-      if (!fileNameWithExt) return;
+      const fileData: Uint8Array = await readFile(filePath);
 
-      const fileBaseName = fileNameWithExt.replace(/\.gb$/, '');
+      const start: number = 0x0134;
+      const end: number = 0x0144;
+      const slice: Uint8Array = fileData.slice(start, end);
 
-      const appDir = await appDataDir();
-      const newDir = await join(appDir, fileBaseName);
+      let lastNonZeroIndex: number = slice.length - 1;
+      while (lastNonZeroIndex >= 0 && slice[lastNonZeroIndex] === 0) {
+        lastNonZeroIndex--;
+      }
+      const trimmedSlice: Uint8Array = slice.slice(0, lastNonZeroIndex + 1);
+      const decoder: TextDecoder = new TextDecoder('ascii');
+      const fileInternalName: string = decoder.decode(trimmedSlice).trim();
 
-      await mkdir(newDir, { recursive: true });
+      const newFileName: string = `${fileInternalName}.gb`;
 
-      const newFilePath = await join(newDir, 'rom.gb');
+      const appDir: string = await appDataDir();
+      const newFilePath: string = await join(appDir, newFileName);
 
       await copyFile(filePath as string, newFilePath, {
         toPathBaseDir: BaseDirectory.AppData,

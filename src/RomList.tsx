@@ -1,6 +1,6 @@
 import { createSignal, createEffect } from 'solid-js';
-import { appDataDir, join, BaseDirectory } from '@tauri-apps/api/path';
-import { exists, readDir } from '@tauri-apps/plugin-fs';
+import { appDataDir, BaseDirectory } from '@tauri-apps/api/path';
+import { readDir } from '@tauri-apps/plugin-fs';
 import RomPicker from './RomPicker';
 
 interface RomListProps {
@@ -8,25 +8,21 @@ interface RomListProps {
 }
 
 const RomList = ({ onRomSelect }: RomListProps) => {
-  const [romDirs, setRomDirs] = createSignal<string[]>([]);
+  const [romFiles, setRomFiles] = createSignal<string[]>([]);
 
   const fetchRoms = async () => {
     try {
       const appDir = await appDataDir();
       const entries = await readDir(appDir, { baseDir: BaseDirectory.AppData });
 
-      const romFolders: string[] = [];
+      const gbFiles: string[] = entries
+        .filter(
+          (entry) =>
+            !entry.isDirectory && entry.name?.toLowerCase().endsWith('.gb')
+        )
+        .map((entry) => entry.name.split('.')[0]);
 
-      for (const entry of entries) {
-        if (entry.isDirectory) {
-          const romPath = await join(appDir, entry.name, 'rom.gb');
-          if (await exists(romPath)) {
-            romFolders.push(entry.name);
-          }
-        }
-      }
-
-      setRomDirs(romFolders);
+      setRomFiles(gbFiles);
     } catch (error) {
       console.error('Error reading ROM directories:', error);
     }
@@ -43,9 +39,9 @@ const RomList = ({ onRomSelect }: RomListProps) => {
     <div class="flex flex-col items-center w-full gap-4">
       <h2>Available ROMs</h2>
       <div class="min-h-32 min-w-48 border-2 rounded-md flex flex-col items-center p-2">
-        {romDirs().length > 0 ? (
+        {romFiles().length > 0 ? (
           <ul class="flex flex-col items-center gap-2 p-2">
-            {romDirs().map((rom) => (
+            {romFiles().map((rom) => (
               <li
                 onClick={() => handleRomClick(rom)}
                 class="cursor-pointer px-4 py-2"

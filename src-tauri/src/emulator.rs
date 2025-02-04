@@ -26,7 +26,7 @@ impl AppState {
 #[tauri::command]
 pub fn setup_gameboy(state: State<Mutex<AppState>>, app_handle: AppHandle, name: String) {
     if let Ok(app_dir) = app_handle.path().app_data_dir() {
-        let rom_path = app_dir.join(name).join("rom.gb");
+        let rom_path = app_dir.join(format!("{}.gb", name));
 
         if rom_path.exists() {
             let mut state = state.lock().unwrap();
@@ -119,7 +119,7 @@ impl EmulatorHandle {
     pub fn new<E: Emulator>(app_handle: AppHandle, rom_path: PathBuf) -> Self {
         let (tx, rx) = crossbeam::channel::bounded(0);
 
-        let rom = fs::read(rom_path).unwrap();
+        let rom = fs::read(&rom_path).unwrap();
 
         std::thread::spawn(move || {
             let mut emulator = E::new(rom, app_handle);
