@@ -2,6 +2,7 @@ use std::{
     fmt::Debug,
     path::PathBuf,
     sync::{Arc, RwLock},
+    thread::JoinHandle,
 };
 
 use anyhow::bail;
@@ -26,7 +27,6 @@ pub struct Cartridge {
     rom: Vec<u8>,
     ram: Arc<RwLock<Vec<u8>>>,
     persister: Option<Persister>,
-    title: String,
 }
 
 impl Cartridge {
@@ -87,12 +87,7 @@ impl Cartridge {
             rom,
             ram,
             persister,
-            title,
         })
-    }
-
-    pub fn get_title(&self) -> String {
-        self.title.clone()
     }
 }
 
@@ -140,11 +135,15 @@ const DEBOUNCE_TIME_SECS: u64 = 3;
 
 #[derive(Debug)]
 pub struct Persister {
-    tx: Sender<PersistRequest>,
+    tx: Sender<PersistMessage>,
+    thread_handle: Option<JoinHandle<()>>,
 }
 
 #[derive(Debug)]
-struct PersistRequest;
+enum PersistMessage {
+    WriteNotify,
+    Shutdown,
+}
 
 impl Persister {
     pub fn new(path: PathBuf, ram: Arc<RwLock<Vec<u8>>>) -> Self {
@@ -161,37 +160,62 @@ impl Persister {
             info!("Loaded existing game save from {:?}", &path);
         }
 
-        std::thread::spawn(move || {
+        let thread_handle = std::thread::spawn(move || {
             let ram = ram.clone();
 
-            loop {
-                let _request = rx.recv().unwrap();
-                let mut debounce_time = Instant::now() + Duration::from_secs(DEBOUNCE_TIME_SECS);
+            'running: loop {
+                match rx.recv() {
+                    Ok(PersistMessage::WriteNotify) => {
+                        let mut debounce_time =
+                            Instant::now() + Duration::from_secs(DEBOUNCE_TIME_SECS);
 
-                while Instant::now() < debounce_time {
-                    if let Ok(_request) = rx.try_recv() {
-                        debounce_time = Instant::now() + Duration::from_secs(DEBOUNCE_TIME_SECS);
+                        // Spin until debounce time has passed with no more requests
+                        while Instant::now() < debounce_time {
+                            match rx.try_recv() {
+                                Ok(PersistMessage::WriteNotify) => {
+                                    debounce_time =
+                                        Instant::now() + Duration::from_secs(DEBOUNCE_TIME_SECS);
+                                }
+                                Ok(PersistMessage::Shutdown) => {
+                                    break 'running;
+                                }
+                                Err(_) => {}
+                            }
+                        }
+
+                        let ram = ram.read().unwrap().clone();
+
+                        info!(
+                            "Saving game data to {:?} following cartridge RAM write.",
+                            &path
+                        );
+                        fs::write(&path, ram).expect("Unable to write to file.");
                     }
-                }
-
-                {
-                    let ram = ram.read().unwrap().clone();
-
-                    info!(
-                        "Saving game data to {:?} following cartridge RAM write.",
-                        &path
-                    );
-                    fs::write(&path, ram).expect("Unable to write to file.");
+                    Ok(PersistMessage::Shutdown) => break 'running,
+                    Err(_) => continue,
                 }
             }
         });
 
-        Persister { tx }
+        Persister {
+            tx,
+            thread_handle: Some(thread_handle),
+        }
     }
 
     pub fn write_data(&mut self) {
-        if let Err(e) = self.tx.try_send(PersistRequest) {
+        if let Err(e) = self.tx.try_send(PersistMessage::WriteNotify) {
             error!("Unable to save data to file. {:?}", e);
         }
+    }
+}
+
+impl Drop for Persister {
+    fn drop(&mut self) {
+        self.tx.send(PersistMessage::Shutdown).unwrap();
+        if let Some(thread_handle) = self.thread_handle.take() {
+            thread_handle.join().unwrap();
+        }
+        info!("Gracefully terminated persistence thread.");
     }
 }

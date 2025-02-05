@@ -46,9 +46,9 @@ const RomList = ({ onRomSelect }: RomListProps) => {
     <div class="flex flex-col items-center w-full gap-4">
       <h2>Available ROMs</h2>
       <div class="overflow-x-auto">
-        <table class="table">
+        <table class="table-md">
           <thead>
-            <tr>
+            <tr class="text-left">
               <th>Game Title</th>
               <th>Publisher</th>
               <th>ROM Size</th>

@@ -425,15 +425,6 @@ impl RTC {
         self.real_time_offset_secs += ((hours as i64) - current_hours) * 3600;
     }
 
-    /// Writes days to the RTC. This updates the "activation date" of the RTC to reflect the new
-    /// days value.
-    pub fn write_days(&mut self, days: u16) {
-        self.activation_date = Utc::now()
-            .naive_utc()
-            .checked_sub_days(Days::new(days as u64))
-            .unwrap_or(self.activation_date);
-    }
-
     /// Writes to the day low value. If the day high bit is set, it will remain unchanged.
     pub fn write_day_low(&mut self, days: u8) {
         let current_days = {

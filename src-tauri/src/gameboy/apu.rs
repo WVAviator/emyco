@@ -1,7 +1,10 @@
+use std::thread::JoinHandle;
+
 use arraydeque::{ArrayDeque, Saturating};
 use bitflags::bitflags;
 use channel::{AudioChannel, NoiseChannel, PulseChannel, WaveChannel};
 use crossbeam::channel::{Receiver, Sender};
+use log::info;
 use rodio::{OutputStream, Sink, Source};
 
 use super::{memory::Register, GlobalConstants};
@@ -30,12 +33,13 @@ const fn ceil_f32(n: f32) -> f32 {
 #[allow(clippy::upper_case_acronyms)]
 pub struct APU {
     enabled: bool,
+    thread_handle: Option<JoinHandle<()>>,
     channel1: PulseChannel,
     channel2: PulseChannel,
     channel3: WaveChannel,
     channel4: NoiseChannel,
     apu_clock: u32,
-    channel_tx: Sender<SampleBuffer>,
+    channel_tx: Sender<AudioThreadMessage>,
     nr51: NR51,
     left_volume: u8,
     right_volume: u8,
@@ -52,7 +56,7 @@ impl APU {
 
         let output_channel = OutputChannel::new(SAMPLE_RATE, channel_rx);
 
-        std::thread::spawn(move || {
+        let thread_handle = std::thread::spawn(move || {
             let (_stream, stream_handle) = OutputStream::try_default().unwrap();
             let sink = Sink::try_new(&stream_handle).unwrap();
 
@@ -63,6 +67,7 @@ impl APU {
 
         APU {
             enabled: false,
+            thread_handle: Some(thread_handle),
             channel1,
             channel2,
             channel3,
@@ -105,6 +110,16 @@ impl APU {
 impl Default for APU {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Drop for APU {
+    fn drop(&mut self) {
+        self.channel_tx.send(AudioThreadMessage::Shutdown).unwrap();
+        if let Some(thread_handle) = self.thread_handle.take() {
+            thread_handle.join().unwrap();
+        }
+        info!("Gracefully terminated audio thread.");
     }
 }
 
@@ -155,7 +170,9 @@ impl Register for APU {
         if self.apu_clock >= AUDIO_FRAME_LENGTH {
             let buffer = self.mix_channels();
 
-            self.channel_tx.send(SampleBuffer(buffer)).unwrap();
+            self.channel_tx
+                .send(AudioThreadMessage::SampleBuffer(buffer))
+                .unwrap();
 
             self.apu_clock -= AUDIO_FRAME_LENGTH;
         }
@@ -171,12 +188,12 @@ const CAPACITY: usize = 2048;
 
 pub struct OutputChannel {
     sample_rate: u32,
-    channel_rx: Receiver<SampleBuffer>,
+    channel_rx: Receiver<AudioThreadMessage>,
     sample_buffer: ArrayDeque<i16, CAPACITY, Saturating>,
 }
 
 impl OutputChannel {
-    fn new(sample_rate: u32, channel_rx: Receiver<SampleBuffer>) -> Self {
+    fn new(sample_rate: u32, channel_rx: Receiver<AudioThreadMessage>) -> Self {
         OutputChannel {
             sample_rate,
             channel_rx,
@@ -190,9 +207,12 @@ impl Iterator for OutputChannel {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.sample_buffer.is_empty() {
-            if let Ok(SampleBuffer(buffer)) = self.channel_rx.try_recv() {
-                self.sample_buffer.extend_back(buffer);
-                // self.samples_dropped = self.sample_buffer.is_full();
+            match self.channel_rx.try_recv() {
+                Ok(AudioThreadMessage::SampleBuffer(buffer)) => {
+                    self.sample_buffer.extend_back(buffer)
+                }
+                Ok(AudioThreadMessage::Shutdown) => return None,
+                Err(_) => {}
             }
         }
 
@@ -220,7 +240,11 @@ impl Source for OutputChannel {
     }
 }
 
-pub struct SampleBuffer([i16; SAMPLE_BUFFER_SIZE]);
+#[allow(clippy::large_enum_variant)]
+enum AudioThreadMessage {
+    SampleBuffer([i16; SAMPLE_BUFFER_SIZE]),
+    Shutdown,
+}
 
 bitflags! {
     #[repr(transparent)]

@@ -1,17 +1,13 @@
-mod cartridge;
+pub mod cartridge;
 mod mbc;
 
 use bitflags::bitflags;
 use cartridge::Cartridge;
 use log::{info, trace};
-use tauri::{AppHandle, Manager};
 
-use std::{path::PathBuf, rc::Rc, sync::RwLock};
+use std::{rc::Rc, sync::RwLock};
 
-use super::{
-    apu::APU, display::WebviewDisplay, joypad::Joypad, ppu::PPU, serial::Serial, timer::Timer,
-    GlobalConstants,
-};
+use super::{apu::APU, joypad::Joypad, ppu::PPU, serial::Serial, timer::Timer, GlobalConstants};
 
 const BOOT_ROM: &[u8; 256] = include_bytes!("./memory/dmg_boot.bin");
 
@@ -72,38 +68,15 @@ pub struct MemoryBus {
 }
 
 impl MemoryBus {
-    pub fn from_rom(
-        rom: Vec<u8>,
-        app_handle: AppHandle,
-        joypad: Rc<RwLock<Joypad>>,
-    ) -> Result<SharedMemoryController, anyhow::Error> {
-        let save_data_path = app_handle.path().local_data_dir().unwrap();
-        let cartridge = Cartridge::new(rom, save_data_path)?;
-
-        let internal_memory = [0; 16384];
-        let boot_mode = true;
-        let dma_state = DMAState::Inactive;
-        let pending_cycles = 0;
-        let timer = Timer::new();
-        let serial = Serial::new();
-        let apu = APU::new();
-        let display = WebviewDisplay::new(app_handle);
-        let ppu = PPU::new(Box::new(display));
-
-        let memory_bus = MemoryBus {
-            boot_mode,
-            cartridge,
-            internal_memory,
-            dma_state,
-            pending_cycles,
-            timer,
-            joypad,
-            serial,
-            apu,
-            ppu,
-        };
-
-        Ok(Rc::new(RwLock::new(memory_bus)))
+    pub fn builder() -> MemoryBusBuilder {
+        MemoryBusBuilder {
+            ppu: None,
+            apu: None,
+            cartridge: None,
+            timer: None,
+            joypad: None,
+            serial: None,
+        }
     }
 
     fn raw_read(&self, address: u16) -> u8 {
@@ -274,5 +247,72 @@ impl TestMemoryBus {
         memory.memory[0x0100..(rom_size + 0x0100)].copy_from_slice(&rom_data[..rom_size]);
 
         Rc::new(RwLock::new(memory))
+    }
+}
+
+pub struct MemoryBusBuilder {
+    ppu: Option<PPU>,
+    apu: Option<APU>,
+    cartridge: Option<Cartridge>,
+    joypad: Option<Rc<RwLock<Joypad>>>,
+    timer: Option<Timer>,
+    serial: Option<Serial>,
+}
+
+impl MemoryBusBuilder {
+    pub fn ppu(mut self, ppu: PPU) -> Self {
+        self.ppu = Some(ppu);
+        self
+    }
+    pub fn apu(mut self, apu: APU) -> Self {
+        self.apu = Some(apu);
+        self
+    }
+    pub fn cartridge(mut self, cartridge: Cartridge) -> Self {
+        self.cartridge = Some(cartridge);
+        self
+    }
+    pub fn joypad(mut self, joypad: Rc<RwLock<Joypad>>) -> Self {
+        self.joypad = Some(joypad);
+        self
+    }
+    pub fn timer(mut self, timer: Timer) -> Self {
+        self.timer = Some(timer);
+        self
+    }
+    pub fn serial(mut self, serial: Serial) -> Self {
+        self.serial = Some(serial);
+        self
+    }
+
+    pub fn build(self) -> MemoryBus {
+        debug_assert!(self.ppu.is_some(), "Missing PPU in Memory Bus builder.");
+        debug_assert!(self.apu.is_some(), "Missing APU in Memory Bus builder.");
+        debug_assert!(
+            self.cartridge.is_some(),
+            "Missing Cartridge in Memory Bus builder."
+        );
+        debug_assert!(
+            self.joypad.is_some(),
+            "Missing Joypad in Memory Bus builder."
+        );
+        debug_assert!(self.timer.is_some(), "Missing Timer in Memory Bus builder.");
+        debug_assert!(
+            self.serial.is_some(),
+            "Missing Serial in Memory Bus builder."
+        );
+
+        MemoryBus {
+            boot_mode: true,
+            cartridge: self.cartridge.unwrap(),
+            internal_memory: [0; 16384],
+            dma_state: DMAState::Inactive,
+            pending_cycles: 0,
+            timer: self.timer.unwrap(),
+            joypad: self.joypad.unwrap(),
+            serial: self.serial.unwrap(),
+            apu: self.apu.unwrap(),
+            ppu: self.ppu.unwrap(),
+        }
     }
 }

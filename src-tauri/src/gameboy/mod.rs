@@ -7,13 +7,18 @@ mod ppu;
 mod serial;
 mod timer;
 
-use std::{path::PathBuf, rc::Rc, sync::RwLock};
+use std::{rc::Rc, sync::RwLock};
 
+use apu::APU;
 use cpu::CPU;
 use crossbeam::channel::Receiver;
+use display::WebviewDisplay;
 use joypad::Joypad;
-use memory::{MemoryBus, SharedMemoryController};
-use tauri::AppHandle;
+use memory::{cartridge::Cartridge, MemoryBus, MemoryController, SharedMemoryController};
+use ppu::PPU;
+use serial::Serial;
+use tauri::{AppHandle, Manager};
+use timer::Timer;
 
 use crate::emulator::{Emulator, EmulatorCommand};
 
@@ -26,18 +31,25 @@ pub struct Gameboy {
 
 impl Emulator for Gameboy {
     fn new(rom: Vec<u8>, app_handle: AppHandle) -> Self {
+        let save_data_path = app_handle.path().local_data_dir().unwrap();
         let joypad = Rc::new(RwLock::new(Joypad::new()));
+        let display = Box::new(WebviewDisplay::new(app_handle));
+        let memory = MemoryBus::builder()
+            .joypad(joypad.clone())
+            .cartridge(Cartridge::new(rom, save_data_path).unwrap())
+            .serial(Serial::new())
+            .apu(APU::new())
+            .ppu(PPU::new(display))
+            .timer(Timer::new())
+            .build();
 
-        let memory = MemoryBus::from_rom(rom, app_handle, joypad.clone()).unwrap();
+        let memory = Rc::new(RwLock::new(memory));
 
-        let cpu = CPU::new(memory.clone());
-
-        Gameboy {
-            memory,
-            cpu,
-            joypad,
-            clock: 0,
-        }
+        GameboyBuilder::new()
+            .cpu(CPU::new(memory.clone()))
+            .memory(memory)
+            .joypad(joypad)
+            .build()
     }
 
     fn start(&mut self, receiver: &Receiver<EmulatorCommand>) -> Result<(), anyhow::Error> {
@@ -96,5 +108,48 @@ impl GlobalConstants {
 
     /// The number of t-cycles that pass before events will be polled. Lower values means
     /// more responsive controls, sacrificing performance
-    pub const INPUT_RESPONSIVENESS: u32 = 8192;
+    pub const INPUT_RESPONSIVENESS: u32 = 70224;
+}
+
+pub struct GameboyBuilder {
+    cpu: Option<CPU>,
+    memory: Option<Rc<RwLock<dyn MemoryController>>>,
+    joypad: Option<Rc<RwLock<Joypad>>>,
+}
+
+impl GameboyBuilder {
+    fn new() -> Self {
+        GameboyBuilder {
+            cpu: None,
+            memory: None,
+            joypad: None,
+        }
+    }
+    fn cpu(mut self, cpu: CPU) -> Self {
+        self.cpu = Some(cpu);
+        self
+    }
+
+    fn memory(mut self, memory: Rc<RwLock<dyn MemoryController>>) -> Self {
+        self.memory = Some(memory);
+        self
+    }
+
+    fn joypad(mut self, joypad: Rc<RwLock<Joypad>>) -> Self {
+        self.joypad = Some(joypad);
+        self
+    }
+
+    fn build(self) -> Gameboy {
+        debug_assert!(self.cpu.is_some(), "No CPU specified on builder.");
+        debug_assert!(self.memory.is_some(), "No Memory specified on builder.");
+        debug_assert!(self.joypad.is_some(), "No Joypad specified on builder.");
+
+        Gameboy {
+            cpu: self.cpu.unwrap(),
+            memory: self.memory.unwrap(),
+            joypad: self.joypad.unwrap(),
+            clock: 4560,
+        }
+    }
 }

@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf, sync::Mutex};
+use std::{fs, path::PathBuf, sync::Mutex, thread::JoinHandle};
 
 use crossbeam::channel::{Receiver, Sender};
 use log::{info, warn};
@@ -28,7 +28,7 @@ pub fn unload_emulator(state: State<Mutex<AppState>>) {
     info!("Request to unload emulator received.");
     let mut state = state.lock().unwrap();
 
-    if let Some(ref emulator_handle) = state.emulator_handle {
+    if let Some(ref mut emulator_handle) = state.emulator_handle {
         info!("Stopping...");
         emulator_handle.stop();
     } else {
@@ -43,7 +43,10 @@ pub fn unload_emulator(state: State<Mutex<AppState>>) {
 
 #[tauri::command]
 pub fn setup_gameboy(state: State<Mutex<AppState>>, app_handle: AppHandle, name: String) {
-    info!("Request to load Gameboy emulator with ROM {} received.", name);
+    info!(
+        "Request to load Gameboy emulator with ROM {} received.",
+        name
+    );
     if let Ok(app_dir) = app_handle.path().app_data_dir() {
         let rom_path = app_dir.join(format!("{}.gb", name));
 
@@ -84,8 +87,8 @@ pub fn pause_emulator(state: State<Mutex<AppState>>) {
 #[tauri::command]
 pub fn stop_emulator(state: State<Mutex<AppState>>) {
     info!("Stopping emulator");
-    let state = state.lock().unwrap();
-    if let Some(ref emulator_handle) = state.emulator_handle {
+    let mut state = state.lock().unwrap();
+    if let Some(ref mut emulator_handle) = state.emulator_handle {
         emulator_handle.stop();
     } else {
         warn!("No emulator loaded!")
@@ -137,6 +140,7 @@ pub enum EmulatorInput {
 
 pub struct EmulatorHandle {
     sender: Sender<EmulatorCommand>,
+    thread_handle: Option<JoinHandle<()>>,
 }
 
 impl EmulatorHandle {
@@ -145,7 +149,7 @@ impl EmulatorHandle {
 
         let rom = fs::read(&rom_path).unwrap();
 
-        std::thread::spawn(move || {
+        let thread_handle = std::thread::spawn(move || {
             let mut emulator = E::new(rom, app_handle);
 
             if let Ok(command) = rx.recv() {
@@ -155,7 +159,10 @@ impl EmulatorHandle {
             }
         });
 
-        Self { sender: tx }
+        Self {
+            sender: tx,
+            thread_handle: Some(thread_handle),
+        }
     }
 
     pub fn start(&self) {
@@ -166,8 +173,12 @@ impl EmulatorHandle {
         self.sender.send(EmulatorCommand::Pause).unwrap();
     }
 
-    pub fn stop(&self) {
+    pub fn stop(&mut self) {
         self.sender.send(EmulatorCommand::Stop).unwrap();
+        if let Some(thread_handle) = self.thread_handle.take() {
+            thread_handle.join().unwrap();
+        }
+        info!("Gracefully terminated emulator thread.");
     }
 
     pub fn send_input(&self, input: EmulatorInput, down: bool) {
