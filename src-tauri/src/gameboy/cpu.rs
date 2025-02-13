@@ -1,9 +1,10 @@
 #[cfg(test)]
 mod test;
 
+use arraydeque::{ArrayDeque, Saturating};
 use bitflags::bitflags;
-
 use log::trace;
+use std::ops::{Deref, DerefMut};
 
 use super::memory::SharedMemoryController;
 
@@ -375,7 +376,7 @@ impl CPU {
                 Operation::Parallel(n) => {
                     // Allows executing the next n operations in parallel.
                     // Adds n * 4 cycles inside while loop to run more operations back to back.
-                    self.pending_cycles += n * 4;
+                    self.pending_cycles += n as i32 * 4;
                 }
                 Operation::ReadWrite {
                     read_from,
@@ -544,7 +545,10 @@ impl CPU {
 
     fn load_operation(&mut self) {
         let next_instruction = match self.state {
-            CPUState::HaltBug => self.read_memory(self.program_counter),
+            CPUState::HaltBug => {
+                self.state = CPUState::Ready;
+                self.read_memory(self.program_counter)
+            }
             _ => self.read_next_pc(),
         };
 
@@ -2937,7 +2941,7 @@ enum Operation {
         read_from: OpTarget,
         write_to: OpTarget,
     },
-    Parallel(i32),
+    Parallel(u8),
     StackPush(OpTarget),
     StackPop(OpTarget),
     Nop,
@@ -2987,10 +2991,6 @@ pub enum ArithmeticOperation {
     Res(u8),
     Set(u8),
 }
-
-use std::ops::{Deref, DerefMut};
-
-use arraydeque::{ArrayDeque, Saturating};
 
 pub trait SplitBytes {
     fn low(&self) -> u8;

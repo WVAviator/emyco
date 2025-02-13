@@ -54,7 +54,7 @@ const GameboyCanvas = (props: GameboyCanvasProps) => {
           'image-rendering': 'pixelated',
         }}
       />
-      <div class="absolute inset-0 z-10 transition-opacity border border-red-500 duration-1000 ease-in-out bg-[#9BBC0F]" style={{
+      <div class="absolute inset-0 z-10 transition-opacity duration-1000 ease-in-out bg-[#9BBC0F]" style={{
         opacity: props.enabled() ? 0 : 1,
       }}></div>
     </div>
