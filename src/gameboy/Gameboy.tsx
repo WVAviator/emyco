@@ -4,6 +4,8 @@ import useDefaultKeymap from '../hooks/useDefaultKeymap';
 import { createSignal } from 'solid-js';
 import ToggleSwitch from '../components/ToggleSwitch';
 import { BiRegularArrowBack } from 'solid-icons/bi';
+import { VsSettingsGear } from 'solid-icons/vs';
+import { FaSolidPowerOff } from 'solid-icons/fa';
 
 interface GameboyProps {
   rom: string;
@@ -29,32 +31,41 @@ const Gameboy = (props: GameboyProps) => {
   useDefaultKeymap();
 
   return (
-    <section>
-      <div class="flex h-16 gap-4 items-center justify-center w-full">
-        <button
-          class="btn btn-square btn-outline"
-          on:click={async () => {
-            await invoke('unload_emulator');
-            props.onGoBack();
-          }}
-        >
-          <BiRegularArrowBack />
-        </button>
-        <ToggleSwitch checked={enabled} setChecked={onToggle}>
-          Power
-        </ToggleSwitch>
-      </div>
-      <div class="w-full relative z-0">
-        <div class="relative w-full">
-          <img
-            class="absolute object-cover w-full scale-150 top-28 pointer-events-none"
-            src="/gameboy.png"
-          />
-        </div>
-        <div class="absolute left-[218px] top-[122px] shadow-inner z-10 w-[327px] aspect-[1.08]">
-          <GameboyCanvas enabled={enabled} />
+    <section class="relative w-[100vw] h-[100vh] flex justify-center items-center overflow-hidden">
+      <div class="relative w-full aspect-[1.25] m-auto flex justify-center items-center">
+        <img
+          class="absolute inset-0 w-full object-cover pointer-events-none"
+          src="/gameboy.png"
+        />
+        <div class="absolute top-[14.15%] w-[51.9%] z-10 aspect-[1.08]">
+          <div class="relative w-full h-full">
+            <GameboyCanvas enabled={enabled} />
+            <div class="absolute inset-0 z-50 shadow-[inset_0px_0px_4px_4px_rgba(0,0,0,0.2)]" />
+          </div>
         </div>
       </div>
+      <ul class="absolute right-2 bottom-2 menu bg-base-200 rounded-box">
+        <li>
+          <a on:click={() => onToggle(!enabled())}>
+            <FaSolidPowerOff color={enabled() ? 'green' : 'white'} />
+          </a>
+        </li>
+        <li>
+          <a
+            on:click={async () => {
+              await invoke('unload_emulator');
+              props.onGoBack();
+            }}
+          >
+            <BiRegularArrowBack />
+          </a>
+        </li>
+        <li>
+          <a>
+            <VsSettingsGear />
+          </a>
+        </li>
+      </ul>
     </section>
   );
 };

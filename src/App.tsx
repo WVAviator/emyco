@@ -15,7 +15,7 @@ function App() {
   };
 
   return (
-    <main class="container">
+    <main class="w-full">
       <Show when={emulator() === 'none'}>
         <div>
           <RomList onRomSelect={selectRom} />
