@@ -10,6 +10,7 @@ use std::{rc::Rc, sync::RwLock};
 use super::{apu::APU, joypad::Joypad, ppu::PPU, serial::Serial, timer::Timer, GlobalConstants};
 
 const BOOT_ROM: &[u8; 256] = include_bytes!("./memory/dmg_boot.bin");
+const CGB_BOOT_ROM: &[u8; 2304] = include_bytes!("./memory/cgb_boot.bin");
 
 pub type SharedMemoryController = Rc<RwLock<dyn MemoryController>>;
 
@@ -313,6 +314,154 @@ impl MemoryBusBuilder {
             serial: self.serial.unwrap(),
             apu: self.apu.unwrap(),
             ppu: self.ppu.unwrap(),
+        }
+    }
+}
+
+pub struct CGBMemoryMap {
+    boot_mode: bool,
+    cartridge: Cartridge,
+    // TODO: Different amount of internal memory for CGB (banking)
+    internal_memory: [u8; 16384],
+    dma_state: DMAState,
+    timer: Timer,
+    joypad: Rc<RwLock<Joypad>>,
+    serial: Serial,
+    apu: APU,
+    ppu: PPU,
+    clock: u32,
+}
+
+impl CGBMemoryMap {
+    fn raw_read(&self, address: u16) -> u8 {
+        match address {
+            0x0000..=0x0900 if self.boot_mode => CGB_BOOT_ROM[address as usize],
+            0x0000..=0x7FFF => self.cartridge.read(address),
+            0x8000..=0x9FFF => self.ppu.read(address),
+            0xA000..=0xBFFF => self.cartridge.read(address),
+            0xFE00..=0xFE9F => self.ppu.read(address),
+            0xFF01..=0xFF02 => self.serial.read(address),
+            0xFF04..=0xFF07 => self.timer.read(address),
+            0xFF40..=0xFF4B => self.ppu.read(address),
+            0xFF00 => self.joypad.read().unwrap().read(address),
+            0xFF10..=0xFF3F if GlobalConstants::AUDIO_ENABLED => self.apu.read(address),
+            0xC000..=0xFFFF => self.internal_memory[(address - 0xC000) as usize],
+        }
+    }
+
+    fn raw_write(&mut self, address: u16, value: u8) {
+        match address {
+            0xFF50 if self.boot_mode => {
+                info!("Boot mode disabled.");
+                self.boot_mode = false;
+            }
+            0x0000..=0x7FFF => {
+                self.cartridge.write(address, value);
+            }
+            0x8000..=0x9FFF => self.ppu.write(address, value),
+            0xA000..=0xBFFF => self.cartridge.write(address, value),
+            0xFF01..=0xFF02 => self.serial.write(address, value),
+            0xFF10..=0xFF3F if GlobalConstants::AUDIO_ENABLED => self.apu.write(address, value),
+            0xFF46 => {
+                let orig = (value as u16) << 8;
+                let dest = 0xFE00;
+                trace!(
+                    "Initiating DMA transfer from {:#05x} through {:#05x}.",
+                    orig,
+                    orig + 159
+                );
+                self.dma_state = DMAState::Active(orig, dest, 160);
+                self.internal_memory[(address - 0xC000) as usize] = value;
+            }
+            0xFF04..=0xFF07 => self.timer.write(address, value),
+            0xFE00..=0xFE9F => self.ppu.write(address, value),
+            0xFF40..=0xFF4B => self.ppu.write(address, value),
+            0xFF00 => self.joypad.write().unwrap().write(address, value),
+            0xC000..=0xFFFF => {
+                self.internal_memory[(address - 0xC000) as usize] = value;
+            }
+        }
+
+        if address != 0xFF0F {
+            self.check_interrupts();
+        }
+    }
+
+    fn check_interrupts(&mut self) {
+        let mut interrupts = Interrupt::empty();
+
+        if let Some(interrupt) = self.timer.retrieve_interrupts() {
+            interrupts |= interrupt;
+        }
+
+        if let Some(interrupt) = self.joypad.write().unwrap().retrieve_interrupts() {
+            interrupts |= interrupt;
+        }
+
+        if let Some(interrupt) = self.serial.retrieve_interrupts() {
+            interrupts |= interrupt;
+        }
+
+        if let Some(interrupt) = self.ppu.retrieve_interrupts() {
+            interrupts |= interrupt;
+        }
+
+        if !interrupts.is_empty() {
+            trace!("Collected interrupts: {:#?}", interrupts);
+            self.trigger_interrupt(interrupts);
+        }
+    }
+}
+
+impl MemoryController for CGBMemoryMap {
+    fn tick(&mut self, cycles: u32) {
+        self.ppu.tick(cycles);
+        self.timer.tick(cycles);
+        // TODO: Serial ticks normally in double speed
+        self.serial.tick(cycles);
+        self.joypad.write().unwrap().tick(cycles);
+        // TODO: APU ticks normally in double speed
+        self.apu.tick(cycles);
+
+        self.check_interrupts();
+
+        if let DMAState::Active(orig, dest, remaining) = self.dma_state {
+            self.clock += cycles;
+            while self.clock >= 4 {
+                self.clock -= 4;
+                let byte = self.raw_read(orig);
+                self.raw_write(dest, byte);
+
+                let remaining = remaining - 1;
+                if remaining == 0 {
+                    trace!("Exiting DMA.");
+                    self.dma_state = DMAState::Inactive;
+                    self.clock = 0;
+                    return;
+                }
+
+                self.dma_state =
+                    DMAState::Active(orig.wrapping_add(1), dest.wrapping_add(1), remaining);
+            }
+        }
+    }
+
+    fn read_byte(&self, address: u16) -> u8 {
+        match (address, &self.dma_state) {
+            (_, DMAState::Inactive) => self.raw_read(address),
+            (0xFF46, _) => self.raw_read(address),
+            (0xFF80..=0xFFFE, DMAState::Active(_, _, _)) => self.raw_read(address),
+            (0xFE00..=0xFE9F, DMAState::Active(_, _, _)) => self.raw_read(address),
+            (_, DMAState::Active(_, _, _)) => 0x00,
+        }
+    }
+
+    fn write_byte(&mut self, address: u16, value: u8) {
+        match (address, &self.dma_state) {
+            (_, DMAState::Inactive) => self.raw_write(address, value),
+            (0xFF80..=0xFFFE, DMAState::Active(_, _, _)) => self.raw_write(address, value),
+            (0xFE00..=0xFE9F, DMAState::Active(_, _, _)) => self.raw_write(address, value),
+            (_, DMAState::Active(_, _, _)) => {}
         }
     }
 }
